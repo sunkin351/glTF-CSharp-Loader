@@ -4,7 +4,9 @@ using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Microsoft.CSharp;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Schema;
 
@@ -83,13 +85,17 @@ namespace GeneratorLib
 
         public Dictionary<string, CodeTypeDeclaration> GeneratedClasses { get; set; }
 
-        public CodeCompileUnit RawClass(string fileName, out string className)
+        public CompilationUnitSyntax RawClass(string fileName, out string className)
         {
             var root = FileSchemas[fileName];
             var schemaFile = new CodeCompileUnit();
             var schemaNamespace = new CodeNamespace("glTFLoader.Schema");
-            schemaNamespace.Imports.Add(new CodeNamespaceImport("System.Linq"));
-            schemaNamespace.Imports.Add(new CodeNamespaceImport("System.Runtime.Serialization"));
+
+            var imports = new[]
+            {
+                SyntaxFactory.UsingDirective(SyntaxFactory.ParseName("System.Linq")),
+                SyntaxFactory.UsingDirective(SyntaxFactory.ParseName("System.Runtime.Serialization"))
+            };
 
             className = Helpers.ParseTitle(root.Title);
 
@@ -123,7 +129,7 @@ namespace GeneratorLib
             return schemaFile;
         }
 
-        private void AddProperty(CodeTypeDeclaration target, string rawName, JSchema schema)
+        private void AddProperty(List<MemberDeclarationSyntax> memberList, string rawName, JSchema schema)
         {
             var propertyName = Helpers.ParsePropertyName(rawName);
             var fieldName = Helpers.GetFieldName(propertyName);
@@ -185,7 +191,7 @@ namespace GeneratorLib
             GeneratedClasses = new Dictionary<string, CodeTypeDeclaration>();
             foreach (var schema in FileSchemas)
             {
-                if (schema.Value.Type != null && schema.Value.Type[0].Name == "object")
+                if (schema.Value.Type == JSchemaType.Object)
                 {
                     CodeGenClass(schema.Key, outputDirectory);
                 }

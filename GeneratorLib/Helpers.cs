@@ -1,4 +1,7 @@
 ﻿using System.CodeDom;
+using System.Text;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace GeneratorLib
 {
@@ -17,44 +20,39 @@ namespace GeneratorLib
         public static string ParseTitle(string rawTitle)
         {
             var words = rawTitle.ToLower().Split(' ');
-            string retval = "";
+
+            StringBuilder builder = new StringBuilder();
             foreach (var word in words)
             {
-                retval += word[0].ToString().ToUpper();
-                retval += word.Substring(1);
+                builder.Append(char.ToUpper(word[0]));
+                builder.Append(word, 1, word.Length - 1);
             }
-            return retval;
+            return builder.ToString();
         }
 
-        public static CodeMemberMethod CreateMethodThatChecksIfTheValueOfAMemberIsNotEqualToAnotherExpression(
-           string name, CodeExpression expression)
+        public static MethodDeclarationSyntax CreateMethodThatChecksIfTheValueOfAMemberIsNotEqualToAnotherExpression(
+           string name, ExpressionSyntax expression)
         {
-            return new CodeMemberMethod
+            string fieldName;
             {
-                ReturnType = new CodeTypeReference(typeof(bool)),
-                Statements =
-                {
-                    new CodeMethodReturnStatement()
-                    {
-                        Expression = new CodeBinaryOperatorExpression()
-                        {
-                            Left = new CodeBinaryOperatorExpression()
-                            {
-                                Left = new CodeFieldReferenceExpression()
-                                {
-                                    FieldName = "m_" + name.Substring(0, 1).ToLower() + name.Substring(1)
-                                },
-                            Operator = CodeBinaryOperatorType.ValueEquality,
-                            Right = expression
-                            },
-                            Operator = CodeBinaryOperatorType.ValueEquality,
-                            Right = new CodePrimitiveExpression(false)
-                        }
-                    }
-                },
-                Attributes = MemberAttributes.Public | MemberAttributes.Final,
-                Name = "ShouldSerialize" + name
-            };
+                var arr = new char[name.Length + 2];
+
+                arr[0] = 'm';
+                arr[1] = '_';
+                arr[2] = char.ToLower(name[0]);
+                name.CopyTo(1, arr, 3, name.Length - 1);
+
+                fieldName = new string(arr);
+            }
+
+            var newExpression = SyntaxFactory.BinaryExpression(SyntaxKind.NotEqualsExpression, SyntaxFactory.IdentifierName(fieldName), expression);
+
+            return SyntaxFactory.MethodDeclaration(default,
+                SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PublicKeyword)),
+                SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.BoolKeyword)),
+                default, SyntaxFactory.Identifier("ShouldSerialize" + name), default, default, default, null, SyntaxFactory.ArrowExpressionClause(newExpression),
+                SyntaxFactory.Token(SyntaxKind.SemicolonToken)
+            );
         }
 
         public static CodeMemberMethod CreateMethodThatChecksIfTheArrayOfValueOfAMemberIsNotEqualToAnotherExpression(
