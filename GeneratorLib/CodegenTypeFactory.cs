@@ -2,16 +2,17 @@
 using System.CodeDom;
 using System.Collections.Generic;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Schema;
 
 namespace GeneratorLib
 {
     public static class CodegenTypeFactory
     {
-        public static CodegenType MakeCodegenType(string name, Schema schema)
+        public static CodegenType MakeCodegenType(string name, JSchema schema)
         {
             var codegenType = InternalMakeCodegenType(Helpers.ParsePropertyName(name), schema);
 
-            if (schema.IsRequired)
+            if (schema.Required != null && schema.Required.Count > 0)
             {
                 codegenType.Attributes.Add(new CodeAttributeDeclaration(new CodeTypeReference(typeof(JsonRequiredAttribute))));
             }
@@ -21,21 +22,16 @@ namespace GeneratorLib
             return codegenType;
         }
 
-        private static CodegenType InternalMakeCodegenType(string name, Schema schema)
+        private static CodegenType InternalMakeCodegenType(string name, JSchema schema)
         {
-            if (!string.IsNullOrWhiteSpace(schema.ReferenceType))
+            if (schema.Reference != null)
             {
                 throw new InvalidOperationException("We don't support de-referencing here.");
             }
 
-            if (!(schema.Type?.Count >= 1))
-            {
-                throw new InvalidOperationException("This Schema does not represent a type");
-            }
-
             if (schema.AdditionalProperties == null)
             {
-                if (schema.Type.Count == 1 && !schema.Type[0].IsReference && schema.Type[0].Name == "array")
+                if (schema.Type == JSchemaType.Array)
                 {
                     return ArrayValueCodegenTypeFactory.MakeCodegenType(name, schema);
                 }
@@ -43,7 +39,7 @@ namespace GeneratorLib
                 return SingleValueCodegenTypeFactory.MakeCodegenType(name, schema);
             }
 
-            if (schema.Type.Count == 1 && schema.Type[0].Name == "object")
+            if (schema.Type == JSchemaType.Object)
             {
                 return MakeDictionaryType(name, schema);
             }

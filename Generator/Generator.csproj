@@ -9,8 +9,10 @@
     <ProjectReference Include="..\GeneratorLib\GeneratorLib.csproj" />
   </ItemGroup>
   
+  <!--
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <Exec WorkingDirectory="$(OutputPath)" Command="Generator.exe" />
   </Target>
+  -->
 
 </Project>

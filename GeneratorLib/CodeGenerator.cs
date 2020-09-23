@@ -5,155 +5,51 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Microsoft.CSharp;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Schema;
 
 namespace GeneratorLib
 {
     public class CodeGenerator
     {
-        private string m_directory;
-        private string m_rootSchemaName;
-
-        public CodeGenerator(string rootSchemaFilePath)
+        public CodeGenerator()
         {
-            rootSchemaFilePath = Path.GetFullPath(rootSchemaFilePath);
-            m_directory = Path.GetDirectoryName(rootSchemaFilePath);
-            m_rootSchemaName = Path.GetFileName(rootSchemaFilePath);
         }
 
-        public Dictionary<string, Schema> FileSchemas { get; private set; }
+        public Dictionary<string, JSchema> FileSchemas { get; private set; }
 
-        public void ParseSchemas()
+        public void ParseSchemas(string pathToRootSchema)
         {
-            FileSchemas = new SchemaParser(m_directory).ParseSchemaTree(m_rootSchemaName);
-        }
+            pathToRootSchema = Path.GetFullPath(pathToRootSchema);
 
-        public void ExpandSchemaReferences()
-        {
-            ExpandSchemaReferences(FileSchemas[m_rootSchemaName]);
-        }
-
-        private void ExpandSchemaReferences(Schema schema)
-        {
-            foreach (var typeReference in new TypeReferenceEnumerator(schema))
+            var settings = new JSchemaReaderSettings()
             {
-                if (typeReference.IsReference)
-                {
-                    ExpandSchemaReferences(FileSchemas[typeReference.Name]);
-                }
-            }
+                Resolver = new JSchemaUrlResolver(),
+                BaseUri = new Uri(pathToRootSchema)
+            };
 
-            if (schema.Properties != null)
+            FileSchemas.Add(Path.GetFileName(pathToRootSchema), GetSchema(pathToRootSchema, settings));
+
+            var directory = Path.GetDirectoryName(pathToRootSchema);
+            
+            foreach (var schemaFile in Directory.EnumerateFiles(directory, "*.schema.json"))
             {
-                var keys = schema.Properties.Keys.ToArray();
-                foreach (var key in keys)
-                {
-                    if (!string.IsNullOrEmpty(schema.Properties[key].ReferenceType))
-                    {
-                        schema.Properties[key] = FileSchemas[schema.Properties[key].ReferenceType];
-                    }
+                var fullPath = Path.Combine(directory, schemaFile);
 
-                    ExpandSchemaReferences(schema.Properties[key]);
-                }
-            }
+                if (fullPath == pathToRootSchema)
+                    continue;
+                
+                settings.BaseUri = new Uri(fullPath);
 
-            if (schema.AdditionalProperties != null)
-            {
-                if (!string.IsNullOrEmpty(schema.AdditionalProperties.ReferenceType))
-                {
-                    schema.AdditionalProperties = FileSchemas[schema.AdditionalProperties.ReferenceType];
-                }
-
-                ExpandSchemaReferences(schema.AdditionalProperties);
-            }
-
-            if (schema.Items != null)
-            {
-                if (!string.IsNullOrEmpty(schema.Items.ReferenceType))
-                {
-                    schema.Items = FileSchemas[schema.Items.ReferenceType];
-                }
-
-                ExpandSchemaReferences(schema.Items);
+                FileSchemas.Add(schemaFile, GetSchema(fullPath, settings));
             }
         }
 
-        public void EvaluateInheritance()
+        private static JSchema GetSchema(string filePath, JSchemaReaderSettings settings)
         {
-            EvaluateInheritance(FileSchemas[m_rootSchemaName]);
-        }
-
-        private void EvaluateInheritance(Schema schema)
-        {
-            foreach (var subSchema in new SchemaEnumerator(schema))
+            using (var reader = new JsonTextReader(new StreamReader(filePath)))
             {
-                EvaluateInheritance(subSchema);
-            }
-
-            foreach (var typeReference in new TypeReferenceEnumerator(schema))
-            {
-                if (typeReference.IsReference)
-                {
-                    EvaluateInheritance(FileSchemas[typeReference.Name]);
-                }
-            }
-
-            if (schema.AllOf == null) return;
-
-            foreach (var typeRef in schema.AllOf)
-            {
-                var baseType = FileSchemas[typeRef.Name];
-
-                if (schema.Properties != null && baseType.Properties != null)
-                {
-                    foreach (var property in baseType.Properties)
-                    {
-                        if (schema.Properties.TryGetValue(property.Key, out Schema value))
-                        {
-                            if (value.IsEmpty())
-                            {
-                                schema.Properties[property.Key] = property.Value;
-                            }
-                            else
-                            {
-                                throw new InvalidOperationException("Attempting to overwrite non-Default schema.");
-                            }
-                        }
-                        else
-                        {
-                            schema.Properties.Add(property.Key, property.Value);
-                        }
-                    }
-                }
-
-                foreach (var property in baseType.GetType().GetProperties())
-                {
-                    if (!property.CanRead || !property.CanWrite) continue;
-
-                    if (property.GetValue(schema) == null)
-                    {
-                        property.SetValue(schema, property.GetValue(baseType));
-                    }
-                }
-            }
-
-            schema.AllOf = null;
-        }
-
-        public void PostProcessSchema()
-        {
-            SetDefaults();
-            EvaluateEnums();
-            SetRequired();
-        }
-
-        private void SetDefaults()
-        {
-            foreach (var schema in FileSchemas.Values)
-            {
-                if (schema.Type == null)
-                {
-                    schema.Type = new[] { new TypeReference { IsReference = false, Name = "object" } };
-                }
+                return JSchema.Load(reader, settings);
             }
         }
 
@@ -183,40 +79,6 @@ namespace GeneratorLib
         /// </summary>
         private void EvaluateEnums()
         {
-            foreach (var schema in FileSchemas.Values)
-            {
-                if (schema.Properties != null)
-                {
-                    foreach (var property in schema.Properties)
-                    {
-                        if (!(property.Value.Type?.Count >= 1))
-                        {
-                            if (property.Value.AnyOf?.Count > 0)
-                            {
-                                // Set the type of the enum
-                                property.Value.SetTypeFromAnyOf();
-
-                                // Populate the values of the enum
-                                property.Value.SetValuesFromAnyOf();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        private void SetRequired()
-        {
-            foreach (var schema in FileSchemas.Values)
-            {
-                if (schema.Required != null && schema.Required.Count > 0)
-                {
-                    foreach (var prop in schema.Required)
-                    {
-                        schema.Properties[prop].IsRequired = true;
-                    }
-                }
-            }
         }
 
         public Dictionary<string, CodeTypeDeclaration> GeneratedClasses { get; set; }
@@ -236,11 +98,11 @@ namespace GeneratorLib
                 Attributes = MemberAttributes.Public
             };
 
-            if (root.AllOf != null)
+            if (root.AllOf != null && root.AnyOf.Count > 0)
             {
                 foreach (var typeRef in root.AllOf)
                 {
-                    if (typeRef.IsReference)
+                    if (typeRef.Reference != null)
                     {
                         throw new NotImplementedException();
                     }
@@ -261,7 +123,7 @@ namespace GeneratorLib
             return schemaFile;
         }
 
-        private void AddProperty(CodeTypeDeclaration target, string rawName, Schema schema)
+        private void AddProperty(CodeTypeDeclaration target, string rawName, JSchema schema)
         {
             var propertyName = Helpers.ParsePropertyName(rawName);
             var fieldName = Helpers.GetFieldName(propertyName);
@@ -305,7 +167,7 @@ namespace GeneratorLib
             target.Members.Add(property);
         }
 
-        public static CodeTypeReference GetCodegenType(CodeTypeDeclaration target, Schema schema, string name, out CodeAttributeDeclarationCollection attributes, out CodeExpression defaultValue)
+        public static CodeTypeReference GetCodegenType(CodeTypeDeclaration target, JSchema schema, string name, out CodeAttributeDeclarationCollection attributes, out CodeExpression defaultValue)
         {
             var codegenType = CodegenTypeFactory.MakeCodegenType(name, schema);
             attributes = codegenType.Attributes;
@@ -318,7 +180,7 @@ namespace GeneratorLib
         public void CSharpCodeGen(string outputDirectory)
         {
             // make sure the output directory exists
-            System.IO.Directory.CreateDirectory(outputDirectory);
+            Directory.CreateDirectory(outputDirectory);
 
             GeneratedClasses = new Dictionary<string, CodeTypeDeclaration>();
             foreach (var schema in FileSchemas)

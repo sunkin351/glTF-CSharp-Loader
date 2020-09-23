@@ -4,19 +4,20 @@ using System.Linq;
 using glTFLoader.Shared;
 using Newtonsoft.Json.Linq;
 using System.Collections.Generic;
+using Newtonsoft.Json.Schema;
 
 namespace GeneratorLib
 {
     public class ArrayValueCodegenTypeFactory
     {
-        public static CodegenType MakeCodegenType(string name, Schema schema)
+        public static CodegenType MakeCodegenType(string name, JSchema schema)
         {
-            if (!(schema.Items?.Type?.Count > 0))
+            if (schema.Items?.Count > 0)
             {
                 throw new InvalidOperationException("Array type must contain an item type");
             }
 
-            if (schema.Enum != null)
+            if (schema.Enum?.Count > 0)
             {
                 throw new InvalidOperationException();
             }
@@ -24,7 +25,7 @@ namespace GeneratorLib
             var returnType = new CodegenType();
             returnType.Attributes.Add(new CodeAttributeDeclaration("Newtonsoft.Json.JsonConverterAttribute", new[] { new CodeAttributeArgument(new CodeTypeOfExpression(typeof(ArrayConverter))) }));
 
-            if (schema.Items.Type.Count > 1)
+            if (schema.Items.Count > 1)
             {
                 returnType.CodeType = new CodeTypeReference(typeof(object[]));
                 returnType.AdditionalMembers.Add(Helpers.CreateMethodThatChecksIfTheValueOfAMemberIsNotEqualToAnotherExpression(name, new CodePrimitiveExpression(null)));
